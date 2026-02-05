@@ -184,7 +184,7 @@ function spawnEnemy(){
   hp=600+wave*150;speed=0.40;color='#e74c3c';name='⚠ 小王';
   showWaveText('⚠ 小王出現！');
  }else{
-  hp=80+wave*30;speed=0.71;color='#c0392b';
+  hp=80+wave*30;speed=0.9;color='#c0392b';
  }
  const e={x:-20,y:200,hp,max:hp,speed,slow:0,type,color,name,dead:false};
  enemies.push(e);
@@ -347,3 +347,4 @@ function startGame(){
 </script>
 </body>
 </html>
+
