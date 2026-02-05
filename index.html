@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>手機塔防（可玩完整版）</title>
+<title>手機塔防（完整可玩版）</title>
 <style>
 body{margin:0;background:#222;color:#fff;font-family:Arial;text-align:center}
 canvas{background:#111;border:2px solid #555;width:100vw;max-width:600px;display:block;margin:0 auto}
@@ -12,10 +12,17 @@ button{padding:6px 10px;margin:3px;font-size:14px}
 #ui{display:flex;justify-content:space-around;margin:6px 0}
 #towerBar{display:flex;justify-content:center;flex-wrap:wrap;margin:4px}
 #towerBar button.active{border:2px solid #0f0}
+#upgradeBox{
+ display:none;position:fixed;left:50%;top:50%;
+ transform:translate(-50%,-50%);
+ background:#333;border:2px solid #aaa;
+ padding:12px;z-index:999
+}
 </style>
 </head>
 <body>
 
+<!-- 主選單 -->
 <div id="menu">
 <h2>📱 手機塔防</h2>
 <div>代幣：<span id="token">0</span></div>
@@ -24,6 +31,7 @@ button{padding:6px 10px;margin:3px;font-size:14px}
 <button onclick="startGame()">▶ 開始遊戲</button>
 </div>
 
+<!-- 遊戲畫面 -->
 <div id="game" style="display:none">
 <div id="ui">
 金錢:<span id="gold">300</span> |
@@ -35,56 +43,65 @@ Wave:<span id="wave">1</span>
 </div>
 
 <!-- 升級視窗 -->
-<div id="upgradeBox" style="display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#333;border:2px solid #aaa;padding:12px;z-index:999">
- <div id="upText" style="margin-bottom:8px"></div>
+<div id="upgradeBox">
+ <div id="upText" style="white-space:pre-line;margin-bottom:8px"></div>
  <button id="upYes">升級</button>
  <button onclick="closeUpgrade()">取消</button>
 </div>
 
 <script>
-let upgrading=false;
-let upgradeTarget=null;
-
+/* ========= 基本 UI ========= */
 const menu=document.getElementById('menu');
 const game=document.getElementById('game');
 const goldSpan=document.getElementById('gold');
 const lifeSpan=document.getElementById('life');
 const waveSpan=document.getElementById('wave');
 const towerBar=document.getElementById('towerBar');
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
 
-let save=JSON.parse(localStorage.getItem('tdSave'))||{tokens:200,owned:['普通塔','國王塔','爆炸塔','冰凍塔']};
+/* ========= 存檔 ========= */
+let save=JSON.parse(localStorage.getItem('tdSave'))||
+ {tokens:200,owned:['普通塔','爆炸塔','冰凍塔','國王塔']};
 let tokens=save.tokens;
 let owned=[...new Set(save.owned)];
 const tokenSpan=document.getElementById('token');
 const ownedSpan=document.getElementById('owned');
-function refreshMenu(){tokenSpan.textContent=tokens;ownedSpan.textContent=owned.join(', ')}
+
+function refreshMenu(){
+ tokenSpan.textContent=tokens;
+ ownedSpan.textContent=owned.join(', ');
+}
 refreshMenu();
 
+/* ========= 抽卡 ========= */
 function openGacha(){
- if(tokens<50)return alert('代幣不足');
+ if(tokens<50) return alert('代幣不足');
  tokens-=50;
  const r=Math.random();
  let t=r<0.7?'普通塔':r<0.9?'爆炸塔':r<0.99?'冰凍塔':'國王塔';
- if(!owned.includes(t))owned.push(t);
+ if(!owned.includes(t)) owned.push(t);
  localStorage.setItem('tdSave',JSON.stringify({tokens,owned}));
  refreshMenu();
  alert('抽到：'+t);
 }
 
-const canvas=document.getElementById('c');
-const ctx=canvas.getContext('2d');
-let gold=300,life=10,wave=1;
+/* ========= 遊戲狀態 ========= */
+let gold,life,wave;
 let towers=[],enemies=[],bullets=[],soldiers=[];
 let selectedType=null;
-let enemyTimer=-120,spawnedThisWave=0,enemiesPerWave=8;
+let enemyTimer,spawnedThisWave;
+const enemiesPerWave=8;
 
+/* ========= 塔數值 ========= */
 const towerStats={
- '普通塔':{cost:50,d:12,r:160,rate:700,color:'#3498db'},
- '爆炸塔':{cost:90,d:80,r:120,rate:1200,color:'#e67e22',aoe:40},
- '冰凍塔':{cost:80,d:26,r:140,rate:900,color:'#5dade2',slow:120},
+ '普通塔':{cost:50,d:20,r:160,rate:700,color:'#3498db'},
+ '爆炸塔':{cost:90,d:80,r:120,rate:2200,color:'#e67e22',aoe:80},
+ '冰凍塔':{cost:80,d:36,r:140,rate:900,color:'#5dade2',slow:120},
  '國王塔':{cost:120,rate:1000,color:'#f1c40f'}
 };
 
+/* ========= 塔列 ========= */
 function buildTowerBar(){
  towerBar.innerHTML='';
  owned.forEach(t=>{
@@ -92,32 +109,42 @@ function buildTowerBar(){
   b.textContent=`${t} ($${towerStats[t].cost})`;
   b.onclick=()=>{
    selectedType=t;
-   document.querySelectorAll('#towerBar button').forEach(x=>x.classList.remove('active'));
+   document.querySelectorAll('#towerBar button')
+    .forEach(x=>x.classList.remove('active'));
    b.classList.add('active');
   };
   towerBar.appendChild(b);
  });
 }
 
+/* ========= 點擊放塔 / 升級 ========= */
+let upgrading=false,upgradeTarget=null;
+
 canvas.onclick=e=>{
- if(upgrading)return;
  const rect=canvas.getBoundingClientRect();
  const x=(e.clientX-rect.left)*(600/rect.width);
  const y=(e.clientY-rect.top)*(400/rect.height);
 
  for(const t of towers){
-  if(Math.hypot(t.x-x,t.y-y)<15){
+  if(Math.hypot(t.x-x,t.y-y)<16){
    const cost=40*t.lv;
    upgradeTarget=t;
-   document.getElementById('upText').textContent=`升級 ${t.type} Lv.${t.lv} → Lv.${t.lv+1}\n花費 $${cost}`;
+   document.getElementById('upText').textContent=
+`${t.type} Lv.${t.lv} → Lv.${t.lv+1}
+
+傷害：${t.d??'-'} → ${t.d?Math.round(t.d*1.3):'-'}
+射程：${t.r??'-'} → ${t.r?t.r+10:'-'}
+攻速：${(t.rate/1000).toFixed(2)}s → ${(Math.max(300,t.rate*0.9)/1000).toFixed(2)}s
+
+花費：$${cost}`;
    document.getElementById('upgradeBox').style.display='block';
    upgrading=true;
    document.getElementById('upYes').onclick=()=>{
-    if(gold<cost){alert('金錢不足');return}
+    if(gold<cost) return alert('金錢不足');
     gold-=cost;
     t.lv++;
-    if(t.d)t.d=Math.round(t.d*1.3);
-    if(t.r)t.r+=10;
+    if(t.d) t.d=Math.round(t.d*1.3);
+    if(t.r) t.r+=10;
     t.rate=Math.max(300,t.rate*0.9);
     closeUpgrade();
    };
@@ -125,9 +152,9 @@ canvas.onclick=e=>{
   }
  }
 
- if(!selectedType)return;
+ if(!selectedType) return;
  const s=towerStats[selectedType];
- if(gold<s.cost)return alert('金錢不足');
+ if(gold<s.cost) return alert('金錢不足');
  gold-=s.cost;
  towers.push({x,y,type:selectedType,last:0,lv:1,...s});
 };
@@ -138,36 +165,72 @@ function closeUpgrade(){
  upgradeTarget=null;
 }
 
+/* ========= 生成怪 ========= */
+let bossBar=null;
+let waveText='',waveTextTimer=0;
+function showWaveText(t){waveText=t;waveTextTimer=120}
+
 function spawnEnemy(){
- const hp=50+wave*25;
- enemies.push({x:-20,y:200,hp,max:hp,speed:1,slow:0});
+ let type='normal';
+ if(spawnedThisWave===enemiesPerWave-1){
+  if(wave%10===0) type='boss';
+  else if(wave%5===0) type='elite';
+ }
+ let hp,speed,color,name='';
+ if(type==='boss'){
+  hp=1600+wave*220;speed=0.25;color='#9b59b6';name='👑 大王';
+  showWaveText('💀 BOSS 出現！');
+ }else if(type==='elite'){
+  hp=600+wave*150;speed=0.40;color='#e74c3c';name='⚠ 小王';
+  showWaveText('⚠ 小王出現！');
+ }else{
+  hp=80+wave*30;speed=0.71;color='#c0392b';
+ }
+ const e={x:-20,y:200,hp,max:hp,speed,slow:0,type,color,name,dead:false};
+ enemies.push(e);
+ if(type!=='normal') bossBar=e;
 }
 
+/* ========= 主迴圈 ========= */
 function loop(){
  ctx.clearRect(0,0,600,400);
+
+ // 道路
  ctx.strokeStyle='#555';ctx.lineWidth=6;
  ctx.beginPath();ctx.moveTo(0,200);ctx.lineTo(600,200);ctx.stroke();
 
+ // 生怪
  enemyTimer++;
- if(enemyTimer>=0 && spawnedThisWave<enemiesPerWave && enemyTimer%60===0){spawnEnemy();spawnedThisWave++}
- if(spawnedThisWave>=enemiesPerWave && enemies.length===0){wave++;spawnedThisWave=0;enemyTimer=-120}
+ if(enemyTimer>=0 && spawnedThisWave<enemiesPerWave && enemyTimer%60===0){
+  spawnEnemy();spawnedThisWave++;
+ }
+ if(spawnedThisWave>=enemiesPerWave && enemies.length===0){
+  wave++;spawnedThisWave=0;enemyTimer=-120;
+ }
 
+ // 敵人
  enemies.forEach(e=>{
   let blocked=false;
-  for(const s of soldiers){if(Math.abs(s.x-e.x)<12){blocked=true;break}}
+  for(const s of soldiers){
+   if(Math.abs(s.x-e.x)<12){blocked=true;break}
+  }
   let sp=e.speed*(e.slow>0?0.5:1);
-  if(e.slow>0)e.slow--;
-  if(!blocked)e.x+=sp;
+  if(e.slow>0) e.slow--;
+  if(!blocked) e.x+=sp;
   if(e.x>600){life--;e.dead=true}
  });
 
+ // 塔
  towers.forEach(t=>{
   ctx.fillStyle=t.color;
-  ctx.beginPath();ctx.arc(t.x,t.y,14,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(t.x,t.y,14+t.lv,0,Math.PI*2);ctx.fill();
 
   if(t.type!=='國王塔' && Date.now()-t.last>t.rate){
    const e=enemies.find(e=>Math.hypot(e.x-t.x,e.y-t.y)<t.r);
-   if(e){bullets.push({x:t.x,y:t.y,target:e,d:t.d,aoe:t.aoe,slow:t.slow});t.last=Date.now()}
+   if(e){
+    bullets.push({x:t.x,y:t.y,target:e,d:t.d,aoe:t.aoe,slow:t.slow});
+    t.last=Date.now();
+   }
   }
 
   if(t.type==='國王塔' && Date.now()-t.last>1000){
@@ -176,70 +239,110 @@ function loop(){
   }
  });
 
+ // 子彈
  bullets.forEach(b=>{
   if(!b.target||b.target.dead){b.done=true;return}
-  const dx=b.target.x-b.x,dy=b.target.y-b.y,d=Math.hypot(dx,dy)||1;
+  const dx=b.target.x-b.x,dy=b.target.y-b.y;
+  const d=Math.hypot(dx,dy)||1;
   b.x+=dx/d*6;b.y+=dy/d*6;
-  ctx.fillStyle='yellow';ctx.beginPath();ctx.arc(b.x,b.y,3,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='yellow';
+  ctx.beginPath();ctx.arc(b.x,b.y,3,0,Math.PI*2);ctx.fill();
   if(d<6){
-   if(b.aoe)enemies.forEach(e=>{if(Math.hypot(e.x-b.target.x,e.y-b.target.y)<b.aoe)e.hp-=b.d});
-   else b.target.hp-=b.d;
-   if(b.slow)b.target.slow=b.slow;
+   if(b.aoe){
+    enemies.forEach(e=>{
+     if(Math.hypot(e.x-b.target.x,e.y-b.target.y)<b.aoe)
+      e.hp-=b.d;
+    });
+   }else b.target.hp-=b.d;
+   if(b.slow) b.target.slow=b.slow;
    b.done=true;
   }
  });
  bullets=bullets.filter(b=>!b.done);
 
+ // 小兵
  soldiers.forEach(s=>{
   s.x+=s.speed;
   enemies.forEach(e=>{
    if(Math.abs(e.x-s.x)<10 && s.hp>0){
     const dmg=Math.min(s.hp,e.hp);
-    e.hp-=dmg;
-    s.hp-=dmg;
+    e.hp-=dmg;s.hp-=dmg;
    }
   });
-  ctx.fillStyle='#2ecc71';ctx.beginPath();ctx.arc(s.x,s.y,6,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle='lime';ctx.fillRect(s.x-8,s.y-10,16*(s.hp/s.max),3);
-  ctx.fillStyle='#fff';
-  ctx.font='9px Arial';
-  ctx.fillText(Math.ceil(s.hp), s.x-8, s.y-14);
+  ctx.fillStyle='#2ecc71';
+  ctx.beginPath();ctx.arc(s.x,s.y,6,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='lime';
+  ctx.fillRect(s.x-8,s.y-10,16*(s.hp/s.max),3);
  });
  soldiers=soldiers.filter(s=>s.hp>0&&s.x>0);
 
+ // 敵人顯示
  enemies.forEach(e=>{
-  if(e.hp<=0){gold+=20;e.dead=true}
-  ctx.fillStyle='red';ctx.beginPath();ctx.arc(e.x,e.y,8,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle='lime';ctx.fillRect(e.x-12,e.y-14,24*(e.hp/e.max),4);
+  if(e.hp<=0){
+   gold+=e.type==='boss'?200:e.type==='elite'?80:20;
+   e.dead=true;
+  }
+  ctx.fillStyle=e.color;
+  ctx.beginPath();ctx.arc(e.x,e.y,8,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='lime';
+  ctx.fillRect(e.x-12,e.y-16,24*(e.hp/e.max),4);
   ctx.fillStyle='#fff';
   ctx.font='10px Arial';
-  ctx.fillText(Math.ceil(e.hp), e.x-10, e.y-18);
+  ctx.fillText(Math.ceil(e.hp),e.x-10,e.y-20);
  });
  enemies=enemies.filter(e=>!e.dead);
+
+ // Boss 血條
+ if(bossBar && !bossBar.dead){
+  ctx.fillStyle='rgba(0,0,0,0.8)';
+  ctx.fillRect(20,8,560,40);
+  ctx.fillStyle=bossBar.color;
+  ctx.fillRect(24,12,552*(bossBar.hp/bossBar.max),32);
+  ctx.strokeStyle='#fff';ctx.strokeRect(20,8,560,40);
+  ctx.fillStyle='#fff';ctx.font='bold 16px Arial';ctx.textAlign='center';
+  ctx.fillText(`${bossBar.name} HP ${Math.ceil(bossBar.hp)}/${bossBar.max}`,300,34);
+  ctx.textAlign='left';
+ }
+
+ // 波次提示
+ if(waveTextTimer>0){
+  ctx.fillStyle='rgba(0,0,0,0.65)';
+  ctx.fillRect(0,140,600,100);
+  ctx.fillStyle='#f1c40f';
+  ctx.font='bold 28px Arial';
+  ctx.textAlign='center';
+  ctx.fillText(waveText,300,200);
+  ctx.textAlign='left';
+  waveTextTimer--;
+ }
 
  goldSpan.textContent=gold;
  lifeSpan.textContent=life;
  waveSpan.textContent=wave;
 
  if(life<=0){
-  const reward = wave * 20;
-  tokens += reward;
-  alert(`遊戲結束！
-獲得代幣：${reward}`);
-  localStorage.setItem('tdSave', JSON.stringify({tokens, owned}));
+  const reward=wave*20;
+  tokens+=reward;
+  alert(`遊戲結束！\n獲得代幣：${reward}`);
+  localStorage.setItem('tdSave',JSON.stringify({tokens,owned}));
   game.style.display='none';
   menu.style.display='flex';
   refreshMenu();
   return;
-}
-requestAnimationFrame(loop);
+ }
+
+ requestAnimationFrame(loop);
 }
 
+/* ========= 開始 ========= */
 function startGame(){
- menu.style.display='none';game.style.display='block';
+ menu.style.display='none';
+ game.style.display='block';
  towers=[];enemies=[];bullets=[];soldiers=[];
- life=10;gold=300;wave=1;enemyTimer=-120;spawnedThisWave=0;
- buildTowerBar();loop();
+ gold=300;life=10;wave=1;
+ enemyTimer=-120;spawnedThisWave=0;
+ buildTowerBar();
+ loop();
 }
 </script>
 </body>
