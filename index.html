@@ -178,13 +178,13 @@ function spawnEnemy(){
  }
  let hp,speed,color,name='';
  if(type==='boss'){
-  hp=1600+wave*220;speed=0.25;color='#9b59b6';name='👑 大王';
+  hp=1600+wave*220;speed=0.5;color='#9b59b6';name='👑 大王';
   showWaveText('💀 BOSS 出現！');
  }else if(type==='elite'){
-  hp=600+wave*150;speed=0.40;color='#e74c3c';name='⚠ 小王';
+  hp=600+wave*150;speed=0.8;color='#e74c3c';name='⚠ 小王';
   showWaveText('⚠ 小王出現！');
  }else{
-  hp=80+wave*30;speed=0.9;color='#c0392b';
+  hp=80+wave*30;speed=1.5;color='#c0392b';
  }
  const e={x:-20,y:200,hp,max:hp,speed,slow:0,type,color,name,dead:false};
  enemies.push(e);
@@ -347,4 +347,5 @@ function startGame(){
 </script>
 </body>
 </html>
+
 
